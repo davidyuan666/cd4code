@@ -20,9 +20,10 @@ class RawBaseline:
         self.total = 0
         self.failures = []
 
-    def evaluate(self, client, generate_fn, prompt, test_code, entry_point):
+    def evaluate(self, client, generate_fn, prompt, test_code, entry_point, token_tracker=None):
         self.total += 1
-        codes = generate_fn(prompt, temperature=0.7, top_p=0.95, n=1, client=client)
+        codes = generate_fn(prompt, temperature=0.7, top_p=0.95, n=1, client=client,
+                           token_tracker=token_tracker)
         if not codes or not codes[0] or not codes[0].strip():
             self.failures.append({"problem": self.total, "reason": "empty_response"})
             return False, ""
@@ -66,9 +67,10 @@ class SelfDebugBaseline:
         self.fixed_count = 0
         self.failures = []
 
-    def evaluate(self, client, generate_fn, prompt, test_code, entry_point):
+    def evaluate(self, client, generate_fn, prompt, test_code, entry_point, token_tracker=None):
         self.total += 1
-        codes = generate_fn(prompt, temperature=0.7, top_p=0.95, n=1, client=client)
+        codes = generate_fn(prompt, temperature=0.7, top_p=0.95, n=1, client=client,
+                           token_tracker=token_tracker)
         if not codes or not codes[0] or not codes[0].strip():
             self.failures.append({"problem": self.total, "reason": "empty_response"})
             return False, ""
@@ -86,7 +88,8 @@ class SelfDebugBaseline:
                         f"```python\n{code}\n```\n"
                     )
                     new_codes = generate_fn(fix_prompt, temperature=0.5, top_p=0.9,
-                                            n=1, client=client)
+                                            n=1, client=client,
+                                            token_tracker=token_tracker)
                     if new_codes and new_codes[0]:
                         code = self.suppressor._extract_function_code(new_codes[0])
                         continue
@@ -108,7 +111,8 @@ class SelfDebugBaseline:
                     f"Write the corrected version. Return ONLY the code."
                 )
                 new_codes = generate_fn(fix_prompt, temperature=0.5, top_p=0.9,
-                                        n=1, client=client)
+                                        n=1, client=client,
+                                        token_tracker=token_tracker)
                 if new_codes and new_codes[0]:
                     code = self.suppressor._extract_function_code(new_codes[0])
 

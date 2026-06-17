@@ -12,14 +12,20 @@ from config import (
 
 
 class CD4CodeSuppressor:
-    def __init__(self, disabled_tiers=None):
+    def __init__(self, disabled_tiers=None, tier4_threshold_override=None,
+                 t1_min_length_override=None, t1_rep_window_override=None):
         self.tier1_threshold = TIER1_CONFIDENCE_THRESHOLD
-        self.tier4_threshold = TIER4_DEFECT_THRESHOLD
+        self.tier4_threshold = tier4_threshold_override if tier4_threshold_override is not None else TIER4_DEFECT_THRESHOLD
+        self.t1_min_length = t1_min_length_override if t1_min_length_override is not None else 5
+        self.t1_rep_window = t1_rep_window_override if t1_rep_window_override is not None else 10
         self.failure_count = 0
         self.total_count = 0
         self.tier_stats = {"t1_filtered": 0, "t2_filtered": 0,
                           "t3_degraded": 0, "t4_activated": 0}
+        self.t4_activation_history = []
+        self.t4_activation_timeseries = []
         self.disabled_tiers = set(disabled_tiers or [])
+        self.per_problem_tier_path = {}
 
     def tier1_proofreading(self, code):
         """Token-level confidence filtering (DNA Polymerase Proofreading analog).
@@ -27,16 +33,16 @@ class CD4CodeSuppressor:
         Rejects code with obviously malformed patterns that low-confidence
         token sampling would produce: extreme repetition, empty blocks, etc.
         """
-        if not code or len(code.strip()) < 5:
+        if not code or len(code.strip()) < self.t1_min_length:
             self.tier_stats["t1_filtered"] += 1
             self.record_failure()
             return None
 
         lines = code.strip().split('\n')
 
-        # Reject extreme repetition (>10 consecutive identical non-empty lines)
-        for i in range(len(lines) - 10):
-            if len(set(lines[i:i+10])) == 1 and lines[i].strip():
+        for i in range(len(lines) - self.t1_rep_window):
+            window = lines[i:i+self.t1_rep_window]
+            if len(set(window)) == 1 and window[0].strip():
                 self.tier_stats["t1_filtered"] += 1
                 self.record_failure()
                 return None
@@ -80,7 +86,7 @@ class CD4CodeSuppressor:
 
         return code
 
-    def tier3_test_degradation(self, code, test_code, entry_point, client=None, generate_fn=None):
+    def tier3_test_degradation(self, code, test_code, entry_point, client=None, generate_fn=None, token_tracker=None):
         """Test-driven discard and regeneration (Ubiquitin-Proteasome analog)."""
         code = self._extract_function_code(code)
 
@@ -95,7 +101,7 @@ class CD4CodeSuppressor:
                     f"Error: {error_msg}\n\n"
                     f"Write the corrected version of the code. Return ONLY the code."
                 )
-                new_codes = generate_fn(fix_prompt, client=client)
+                new_codes = generate_fn(fix_prompt, client=client, token_tracker=token_tracker)
                 if new_codes and new_codes[0]:
                     code = self._extract_function_code(new_codes[0])
 
@@ -145,7 +151,8 @@ class CD4CodeSuppressor:
         self.failure_count += 1
 
     def process(self, code, test_code=None, entry_point=None,
-                client=None, generate_fn=None):
+                client=None, generate_fn=None, token_tracker=None,
+                problem_id=None):
         """Apply CD4Code tiers to a generated code sample.
 
         Tiers listed in self.disabled_tiers are bypassed (code passes through).
@@ -159,20 +166,34 @@ class CD4CodeSuppressor:
             "t4_conservative": False,
             "final_code": None,
             "success": False,
+            "tier_path": {"t1": "bypass", "t2": "bypass", "t3": "bypass", "t4": "bypass"},
         }
 
         self.total_count += 1
+        pid = problem_id if problem_id is not None else self.total_count
 
         code = self._extract_function_code(code)
 
-        # Check tier4 before processing
         if 4 not in self.disabled_tiers:
             result["t4_conservative"] = self.tier4_global_monitor()
+            self.t4_activation_history.append(result["t4_conservative"])
+            result["tier_path"]["t4"] = "active" if result["t4_conservative"] else "inactive"
+            if result["t4_conservative"]:
+                self.t4_activation_timeseries.append({
+                    "problem_id": pid,
+                    "defect_ratio": round(self.failure_count / max(self.total_count, 1), 4),
+                    "total_count": self.total_count,
+                })
+        else:
+            result["tier_path"]["t4"] = "bypass"
 
         if 1 not in self.disabled_tiers:
             code = self.tier1_proofreading(code)
             if code is None:
+                result["tier_path"]["t1"] = "filtered"
+                self.per_problem_tier_path[pid] = result["tier_path"]
                 return result
+            result["tier_path"]["t1"] = "passed"
             result["passed_t1"] = True
         else:
             result["passed_t1"] = True
@@ -180,7 +201,10 @@ class CD4CodeSuppressor:
         if 2 not in self.disabled_tiers:
             code, syntax_error = self.tier2_mismatch_repair(code)
             if code is None:
+                result["tier_path"]["t2"] = "filtered"
+                self.per_problem_tier_path[pid] = result["tier_path"]
                 return result
+            result["tier_path"]["t2"] = "passed"
             result["passed_t2"] = True
         else:
             code = self._extract_function_code(code)
@@ -188,21 +212,28 @@ class CD4CodeSuppressor:
 
         if test_code and 3 not in self.disabled_tiers:
             code, passed = self.tier3_test_degradation(
-                code, test_code, entry_point, client, generate_fn
+                code, test_code, entry_point, client, generate_fn, token_tracker
             )
             if not passed:
+                result["tier_path"]["t3"] = "degraded"
+                self.per_problem_tier_path[pid] = result["tier_path"]
                 self.record_failure()
                 return result
+            result["tier_path"]["t3"] = "passed"
             result["passed_t3"] = True
         elif test_code:
             passed, _ = self._run_tests(code, test_code, entry_point)
             if not passed:
+                result["tier_path"]["t3"] = "failed"
+                self.per_problem_tier_path[pid] = result["tier_path"]
                 self.record_failure()
                 return result
+            result["tier_path"]["t3"] = "passed"
             result["passed_t3"] = True
 
         result["final_code"] = code
         result["success"] = True
+        self.per_problem_tier_path[pid] = result["tier_path"]
         return result
 
     def get_stats(self):
@@ -210,3 +241,12 @@ class CD4CodeSuppressor:
 
     def get_defect_ratio(self):
         return self.failure_count / max(self.total_count, 1)
+
+    def get_activation_history(self):
+        return list(self.t4_activation_history)
+
+    def get_activation_timeseries(self):
+        return list(self.t4_activation_timeseries)
+
+    def get_per_problem_tier_path(self):
+        return dict(self.per_problem_tier_path)
