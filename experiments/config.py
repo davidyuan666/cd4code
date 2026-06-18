@@ -8,7 +8,7 @@ import os
 # DeepSeek API configuration
 DEEPSEEK_API_KEY = os.environ["DEEPSEEK_API_KEY"]
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
-DEEPSEEK_MODEL = "deepseek-v4-flash"
+DEEPSEEK_MODEL = "deepseek-v4-pro"
 
 # Proxy configuration (from environment variable)
 HTTP_PROXY = os.environ.get("HTTP_PROXY", os.environ.get("http_proxy", ""))
@@ -57,4 +57,4 @@ BOOTSTRAP_CONFIDENCE = 0.95            # Confidence level
 HUMANEVAL_PATH = "data/HumanEval.jsonl"
 MBPP_PATH = "data/mbpp.jsonl"
 RESULTS_DIR = "results"
-FIGURES_DIR = "../paper/figures"
+FIGURES_DIR = "../../../论文学术/manuscripts/SCI/Automated_Software_Engineering/figures"

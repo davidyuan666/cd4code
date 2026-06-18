@@ -18,8 +18,8 @@ from framework_diagram import draw_framework_diagram
 
 RESULTS_DIR = os.path.join(os.path.dirname(__file__), '..', 'results')
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PAPER_FIGURES = os.path.join(SCRIPT_DIR, '..', '..', '..', '..', '..',
-                              '论文', '学术', '预投论文', 'papers', 'SCI',
+PAPER_FIGURES = os.path.join(SCRIPT_DIR, '..', '..', '..',
+                              '论文学术', 'manuscripts', 'SCI',
                               'Automated_Software_Engineering', 'figures')
 
 

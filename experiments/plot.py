@@ -3,6 +3,7 @@ import os
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 import numpy as np
 
 
@@ -38,17 +39,20 @@ def plot_defect_density_curve(base_density_history, multiguardcode_density_histo
 
 
 def plot_tier_survival(tier_stats, save_path="tier_survival.pdf"):
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 3.5))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.5))
 
     tiers = ['Input\n(100%)', 'T1\nOutput Filter', 'T2\nAST Validate', 'T3\nTest Repair', 'Output']
     survival_rates = [100,
                       100 - tier_stats.get("t1_filtered", 0) / max(tier_stats.get("total", 1), 0.01) * 100,
                       85, 77, 55]
     colors = ['#1565C0', '#1E88E5', '#43A047', '#FB8C00', '#E53935']
-    ax1.bar(tiers, survival_rates, color=colors, edgecolor='white', linewidth=0.5)
+    bar_positions = list(range(len(tiers)))
+    ax1.bar(bar_positions, survival_rates, color=colors, edgecolor='white', linewidth=0.5)
     ax1.set_ylabel('Code Survival Rate (%)')
     ax1.set_title('Per-Tier Survival (Funnel)')
     ax1.set_ylim(0, 110)
+    ax1.set_xticks(bar_positions)
+    ax1.set_xticklabels(tiers, rotation=10, ha='center', fontsize=7)
     for i, v in enumerate(survival_rates):
         ax1.text(i, v + 1.5, f'{v:.0f}%', ha='center', fontsize=8)
 
@@ -66,7 +70,7 @@ def plot_tier_survival(tier_stats, save_path="tier_survival.pdf"):
     for i, v in enumerate(filter_rates):
         ax2.text(v + 0.01, i, f'{v:.1%}', va='center', fontsize=8)
 
-    fig.tight_layout()
+    fig.tight_layout(pad=2.0)
     os.makedirs(os.path.dirname(save_path) if os.path.dirname(save_path) else ".", exist_ok=True)
     fig.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close(fig)
@@ -265,31 +269,44 @@ def plot_transition_matrix(repaired_regressed, save_path="transition_matrix.pdf"
         print("No transition data to plot")
         return
 
-    fig, ax = plt.subplots(figsize=(5, 5))
+    n_uf = summary.get("n_unchanged_fail", 0)
+    n_rp = summary.get("n_repaired", 0)
+    n_rg = summary.get("n_regressed", 0)
+    n_up = summary.get("n_unchanged_pass", 0)
+    matrix = [[n_uf, n_rp],
+              [n_rg, n_up]]
+    cell_colors = [['#BDBDBD', '#42A5F5'],
+                   ['#EF5350', '#43A047']]
+    n_total = max(n_uf + n_rp + n_rg + n_up, 1)
 
-    matrix = [[summary.get("n_unchanged_fail", 0), summary.get("n_repaired", 0)],
-              [summary.get("n_regressed", 0), summary.get("n_unchanged_pass", 0)]]
-
-    im = ax.imshow(matrix, cmap='RdYlGn', vmin=0)
-    ax.set_xticks([0, 1])
-    ax.set_yticks([0, 1])
-    ax.set_xticklabels(['Fail', 'Pass'])
-    ax.set_yticklabels(['Fail', 'Pass'])
-    ax.set_xlabel('MultiGuardCode Result')
-    ax.set_ylabel('Raw Baseline Result')
-    ax.set_title('Problem Transition Matrix\n(Fail/Pass from Raw -> MultiGuardCode)')
+    fig, ax = plt.subplots(figsize=(5.5, 5))
+    ax.set_xlim(-0.5, 1.5)
+    ax.set_ylim(-0.5, 1.5)
 
     for i in range(2):
         for j in range(2):
-            text_color = 'white' if matrix[i][j] > max(sum(r) for r in matrix) * 0.5 else 'black'
-            ax.text(j, i, str(matrix[i][j]), ha='center', va='center',
-                    fontsize=16, fontweight='bold', color=text_color)
+            rect = patches.Rectangle((j - 0.45, 1 - i - 0.45), 0.9, 0.9,
+                                     facecolor=cell_colors[i][j],
+                                     edgecolor='white', linewidth=2)
+            ax.add_patch(rect)
+            text_color = 'white' if cell_colors[i][j] in ['#43A047', '#EF5350', '#42A5F5'] else 'black'
+            ax.text(j, 1 - i, str(matrix[i][j]),
+                    ha='center', va='center', fontsize=18,
+                    fontweight='bold', color=text_color)
 
-    n_total = sum(sum(r) for r in matrix)
-    repair_rate = summary.get("n_repaired", 0) / max(n_total, 1)
-    regression_rate = summary.get("n_regressed", 0) / max(n_total, 1)
-    ax.set_xlabel(f'MultiGuardCode Result\n(Repair={repair_rate:.1%}, Regression={regression_rate:.1%})')
+    ax.set_xticks([0, 1])
+    ax.set_yticks([0, 1])
+    ax.set_xticklabels(['Fail', 'Pass'], fontsize=11)
+    ax.set_yticklabels(['Fail', 'Pass'], fontsize=11)
+    ax.set_xlabel('MultiGuardCode Result', fontsize=11)
+    ax.set_ylabel('Raw Baseline Result', fontsize=11)
 
+    repair_rate = n_rp / n_total
+    regression_rate = n_rg / n_total
+    ax.set_title(f'Problem Transition Matrix\n(Repair={repair_rate:.1%}, Regression={regression_rate:.1%})',
+                 fontsize=12, fontweight='bold')
+
+    ax.set_aspect('equal')
     fig.tight_layout()
     os.makedirs(os.path.dirname(save_path) if os.path.dirname(save_path) else ".", exist_ok=True)
     fig.savefig(save_path, dpi=150, bbox_inches='tight')
